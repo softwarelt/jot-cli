@@ -1,0 +1,13 @@
+# Built binaries
+/jot
+/jot-cli
+
+# Local jot data, in case JOT_HOME ever points inside the repo during dev
+/.jot/
+
+# Go build/test artifacts
+*.test
+*.out
+
+# OS/editor cruft
+.DS_Store
