@@ -468,11 +468,76 @@ os.Chmod(dbPath, 0600)
 
 ## 8. Build & distribution
 
-- `go build -trimpath -ldflags "-s -w -X main.version=$(git describe --tags --always)"`
-- `CGO_ENABLED=0` for every target — only possible because of the
-  `modernc.org/sqlite` choice in §1.
-- GoReleaser targets: `darwin/amd64`, `darwin/arm64`, `linux/amd64`, `linux/arm64`.
-- GoReleaser also generates the Homebrew tap formula (NFR-7).
+### 8.1 CI — implemented
+
+`.github/workflows/ci.yml` runs on every push to `main` and every PR, on a
+`{ubuntu-latest, macos-latest}` matrix (matching the two platforms v1
+actually targets): `go build ./...`, `go vet ./...`, `go test ./... -race`,
+a `gofmt -l` cleanliness check, and a `go mod tidy` drift check. This is
+deliberately separate from releasing anything — it exists purely to catch a
+regression on every push, tag or no tag.
+
+### 8.2 Release automation — planned, not yet built
+
+Deferred by choice (see the session's decision to ship CI first). The plan,
+so this doesn't have to be re-derived later:
+
+**Correction to an earlier draft of this section:** the ldflags example
+below originally read `-X main.version=...`. That's now wrong — `Version`
+was moved to `internal/cli` (§4.1) once the dispatch layer split `main`
+from the cobra command tree, and was never updated here. The corrected
+path is `github.com/softwarelt/jot-cli/internal/cli.Version`, reflected
+below.
+
+**Step 1 — `.goreleaser.yaml` at the repo root:**
+```yaml
+builds:
+  - main: ./cmd/jot
+    binary: jot
+    env:
+      - CGO_ENABLED=0                    # only possible via modernc.org/sqlite, §1
+    goos: [darwin, linux]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w
+      - -X github.com/softwarelt/jot-cli/internal/cli.Version={{.Version}}
+archives:
+  - formats: [tar.gz]
+checksum:
+  name_template: checksums.txt
+changelog:
+  sort: asc
+```
+
+**Step 2 — `.github/workflows/release.yml`:** triggers on a pushed tag
+matching `v*`, checks out, sets up Go, runs `goreleaser/goreleaser-action`
+with `args: release --clean`. Needs `contents: write` permission (or the
+default `GITHUB_TOKEN` is enough) to create the GitHub Release and attach
+the built archives + `checksums.txt`.
+
+**Step 3 — tagging convention:** annotated tags, `git tag -a v0.1.0 -m
+"..."` then `git push --tags`. Start at `v0.1.0` rather than `v1.0.0` —
+nothing about the product plan's "v1" naming implies this is a 1.0-stable
+public commitment yet.
+
+**At this point (steps 1–3 only), tagging a release already produces a
+GitHub Release with four cross-compiled binaries and a checksums file —
+installable via manual download. This is a reasonable place to stop for a
+while.**
+
+**Step 4 — Homebrew tap, only once there's a reason to want `brew install`
+specifically (e.g. sharing this beyond one machine):**
+- Create a separate repo, `softwarelt/homebrew-tap`.
+- Create a GitHub personal access token scoped to push to that repo, add
+  it as a secret in *this* repo (e.g. `HOMEBREW_TAP_GITHUB_TOKEN`) — the
+  default `GITHUB_TOKEN` cannot push to a different repository.
+- Add a `brews:` block to `.goreleaser.yaml` pointing at the tap repo,
+  using that secret. GoReleaser then generates and pushes the formula on
+  every release automatically.
+- Once merged: `brew install softwarelt/tap/jot`.
+
+None of step 4 works without the tap repo and token existing first — that
+setup happens on GitHub's side, not from a build config change alone.
 
 ## 9. Resolved questions (decision log)
 
